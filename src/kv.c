@@ -22,6 +22,7 @@ struct kv_store {
     size_t size;
     double max_load;
     size_t resizes;
+    size_t min_capacity;
 };
 
 static uint64_t fnv1a(const char *key, size_t len) {
@@ -64,6 +65,42 @@ static void free_entry(kv_entry *entry) {
     free(entry);
 }
 
+static void resize(kv_store *store, size_t new_capacity) {
+    kv_entry **buckets = calloc(new_capacity, sizeof *buckets);
+    if (buckets == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < store->capacity; i++) {
+        kv_entry *entry = store->buckets[i];
+        while (entry != NULL) {
+            kv_entry *next = entry->next;
+            size_t index = (size_t)(entry->hash & (new_capacity - 1));
+            entry->next = buckets[index];
+            buckets[index] = entry;
+            entry = next;
+        }
+    }
+    free(store->buckets);
+    store->buckets = buckets;
+    store->capacity = new_capacity;
+    store->resizes++;
+}
+
+static void grow_if_needed(kv_store *store) {
+    if ((double)store->size > (double)store->capacity * store->max_load &&
+        store->capacity <= SIZE_MAX / 2) {
+        resize(store, store->capacity * 2);
+    }
+}
+
+/* Shrinking at a quarter of the load factor leaves a gap, so the table can't flip-flop. */
+static void shrink_if_needed(kv_store *store) {
+    if (store->capacity > store->min_capacity &&
+        (double)store->size < (double)store->capacity * store->max_load / 4) {
+        resize(store, store->capacity / 2);
+    }
+}
+
 static size_t round_up_capacity(size_t requested) {
     size_t capacity = KV_DEFAULT_CAPACITY;
     while (capacity < requested) {
@@ -102,6 +139,7 @@ kv_store *kv_create(const kv_options *opts) {
     store->size = 0;
     store->max_load = max_load;
     store->resizes = 0;
+    store->min_capacity = capacity;
     return store;
 }
 
@@ -160,6 +198,7 @@ kv_status kv_put(kv_store *store, const char *key, const void *value, size_t val
     entry->value_len = value_len;
     store->buckets[index] = entry;
     store->size++;
+    grow_if_needed(store);
     return KV_OK;
 }
 
@@ -191,6 +230,7 @@ kv_status kv_delete(kv_store *store, const char *key) {
     *link = entry->next;
     free_entry(entry);
     store->size--;
+    shrink_if_needed(store);
     return KV_OK;
 }
 

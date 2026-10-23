@@ -27,10 +27,13 @@ EXAMPLES := $(patsubst examples/%.c,$(DEBUG_DIR)/bin/%,$(EXAMPLE_SRC))
 VALGRIND := valgrind --quiet --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1
 CPPCHECK := cppcheck --std=c11 --enable=warning,style,performance,portability --error-exitcode=1 --inline-suppr --quiet
 
-.PHONY: all test asan valgrind examples format format-check lint clean
+.PHONY: all check test asan valgrind examples format format-check lint clean
 .SECONDARY:
 
 all: $(DEBUG_TESTS) $(EXAMPLES)
+
+check: format-check lint test asan valgrind examples
+
 
 test: $(DEBUG_TESTS)
 	@for t in $^; do echo "== $$t"; $$t || exit 1; done

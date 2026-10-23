@@ -53,3 +53,5 @@ jobs:
           make CC=${{ matrix.cc }} asan
       - name: Valgrind
         run: make CC=${{ matrix.cc }} valgrind
+      - name: Example program
+        run: make CC=${{ matrix.cc }} examples

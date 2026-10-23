@@ -33,6 +33,12 @@ static void assert_value(const kv_store *s, const char *key, const void *expecte
     }
 }
 
+static size_t capacity_of(const kv_store *s) {
+    kv_stats stats;
+    kv_get_stats(s, &stats);
+    return stats.capacity;
+}
+
 static void assert_missing(const kv_store *s, const char *key) {
     const void *value = "not cleared";
     size_t value_len = 99;
@@ -209,6 +215,80 @@ static void test_deletes_anywhere_in_long_chains(void) {
     kv_destroy(s);
 }
 
+static void test_grows_to_hold_100000_keys(void) {
+    char key[32];
+    for (int i = 0; i < 100000; i++) {
+        snprintf(key, sizeof key, "key-%d", i);
+        TEST_ASSERT_EQUAL_INT(KV_OK, kv_put(store, key, &i, sizeof i));
+    }
+    for (int i = 0; i < 100000; i++) {
+        snprintf(key, sizeof key, "key-%d", i);
+        assert_value(store, key, &i, sizeof i);
+    }
+    kv_stats stats;
+    kv_get_stats(store, &stats);
+    TEST_ASSERT_EQUAL_size_t(100000, stats.size);
+    TEST_ASSERT_EQUAL_size_t(262144, stats.capacity);
+    TEST_ASSERT_EQUAL_size_t(15, stats.resizes);
+    TEST_ASSERT_LESS_OR_EQUAL_size_t(10, stats.longest_chain);
+}
+
+static void test_load_factor_never_exceeds_max(void) {
+    char key[32];
+    for (int i = 0; i < 1000; i++) {
+        snprintf(key, sizeof key, "key-%d", i);
+        put_string(store, key, "v");
+        kv_stats stats;
+        kv_get_stats(store, &stats);
+        TEST_ASSERT_TRUE((double)stats.size <= (double)stats.capacity * 0.75);
+        TEST_ASSERT_EQUAL_size_t(0, stats.capacity & (stats.capacity - 1));
+    }
+}
+
+static void test_value_pointer_survives_resizes(void) {
+    const void *before = NULL;
+    const void *after = NULL;
+    put_string(store, "anchor", "still here");
+    TEST_ASSERT_EQUAL_INT(KV_OK, kv_get(store, "anchor", &before, NULL));
+    size_t capacity = capacity_of(store);
+    char key[32];
+    for (int i = 0; i < 10000; i++) {
+        snprintf(key, sizeof key, "key-%d", i);
+        put_string(store, key, "v");
+    }
+    TEST_ASSERT_GREATER_THAN_size_t(capacity, capacity_of(store));
+    TEST_ASSERT_EQUAL_INT(KV_OK, kv_get(store, "anchor", &after, NULL));
+    TEST_ASSERT_EQUAL_PTR(before, after);
+    TEST_ASSERT_EQUAL_MEMORY("still here", before, 10);
+}
+
+static void test_shrinks_back_after_deletes(void) {
+    char key[32];
+    for (int i = 0; i < 1000; i++) {
+        snprintf(key, sizeof key, "key-%d", i);
+        put_string(store, key, "v");
+    }
+    TEST_ASSERT_EQUAL_size_t(2048, capacity_of(store));
+    for (int i = 0; i < 1000; i++) {
+        snprintf(key, sizeof key, "key-%d", i);
+        TEST_ASSERT_EQUAL_INT(KV_OK, kv_delete(store, key));
+    }
+    TEST_ASSERT_EQUAL_size_t(0, kv_size(store));
+    TEST_ASSERT_EQUAL_size_t(8, capacity_of(store));
+    put_string(store, "again", "works");
+    assert_value(store, "again", "works", 5);
+}
+
+static void test_never_shrinks_below_initial_capacity(void) {
+    kv_options opts = {.initial_capacity = 1024};
+    kv_store *s = kv_create(&opts);
+    TEST_ASSERT_NOT_NULL(s);
+    put_string(s, "a", "1");
+    TEST_ASSERT_EQUAL_INT(KV_OK, kv_delete(s, "a"));
+    TEST_ASSERT_EQUAL_size_t(1024, capacity_of(s));
+    kv_destroy(s);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_new_store_is_empty);
@@ -227,5 +307,10 @@ int main(void) {
     RUN_TEST(test_null_arguments_are_rejected);
     RUN_TEST(test_many_keys_share_few_buckets);
     RUN_TEST(test_deletes_anywhere_in_long_chains);
+    RUN_TEST(test_grows_to_hold_100000_keys);
+    RUN_TEST(test_load_factor_never_exceeds_max);
+    RUN_TEST(test_value_pointer_survives_resizes);
+    RUN_TEST(test_shrinks_back_after_deletes);
+    RUN_TEST(test_never_shrinks_below_initial_capacity);
     return UNITY_END();
 }

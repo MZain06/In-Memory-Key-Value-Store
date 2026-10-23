@@ -14,6 +14,7 @@
 #define VALUE_POOL 256
 #define MAX_RUNS 100
 #define MAX_COUNT 100000000
+#define TIMELINE_WINDOW 1000
 
 typedef struct {
     char text[KEY_LEN + 1];
@@ -36,6 +37,7 @@ typedef struct {
     size_t runs;
     double max_load;
     uint64_t seed;
+    const char *timeline_path;
 } config;
 
 typedef struct {
@@ -242,6 +244,28 @@ static void run_once(const config *cfg, const key_text *keys, const request *req
     result->max = samples[cfg->ops - 1];
 }
 
+/* One extra build, recording the slowest insert in each window of TIMELINE_WINDOW inserts. */
+static void write_timeline(const config *cfg, const key_text *keys, uint64_t *samples) {
+    FILE *timeline = fopen(cfg->timeline_path, "w");
+    if (timeline == NULL) {
+        perror(cfg->timeline_path);
+        exit(1);
+    }
+    insert_build(cfg, keys, samples, NULL);
+    fprintf(timeline, "first_insert,max_ns\n");
+    for (size_t start = 0; start < cfg->keys; start += TIMELINE_WINDOW) {
+        size_t end = start + TIMELINE_WINDOW < cfg->keys ? start + TIMELINE_WINDOW : cfg->keys;
+        uint64_t slowest = 0;
+        for (size_t i = start; i < end; i++) {
+            if (samples[i] > slowest) {
+                slowest = samples[i];
+            }
+        }
+        fprintf(timeline, "%zu,%" PRIu64 "\n", start, slowest);
+    }
+    fclose(timeline);
+}
+
 static void write_row(FILE *csv, const config *cfg, size_t run, const run_result *r,
                       uint64_t timer_ns) {
     fprintf(csv,
@@ -306,6 +330,9 @@ static void run_workload(const config *cfg, uint64_t timer_ns, FILE *csv) {
         }
     }
     print_summary(results, cfg->runs);
+    if (cfg->kind == INSERT && cfg->timeline_path != NULL) {
+        write_timeline(cfg, keys, samples);
+    }
 
     free(samples);
     free(requests);
@@ -315,7 +342,7 @@ static void run_workload(const config *cfg, uint64_t timer_ns, FILE *csv) {
 static void usage(const char *program) {
     fprintf(stderr,
             "usage: %s -w insert|get_hit|get_miss|mixed|all [-k keys] [-n operations] [-r runs]\n"
-            "          [-l max_load_factor] [-s seed] [-o results.csv]\n",
+            "          [-l max_load_factor] [-s seed] [-o results.csv] [-t timeline.csv]\n",
             program);
     exit(2);
 }
@@ -335,12 +362,13 @@ int main(int argc, char **argv) {
                   .ops = 5000000,
                   .runs = 5,
                   .max_load = 0.75,
-                  .seed = 42};
+                  .seed = 42,
+                  .timeline_path = NULL};
     const char *csv_path = NULL;
     bool all = false;
     int option;
     setvbuf(stdout, NULL, _IOLBF, 0);
-    while ((option = getopt(argc, argv, "w:k:n:r:l:s:o:")) != -1) {
+    while ((option = getopt(argc, argv, "w:k:n:r:l:s:o:t:")) != -1) {
         char *end = NULL;
         switch (option) {
         case 'w':
@@ -372,11 +400,15 @@ int main(int argc, char **argv) {
         case 'o':
             csv_path = optarg;
             break;
+        case 't':
+            cfg.timeline_path = optarg;
+            break;
         default:
             usage(argv[0]);
         }
     }
-    if (optind != argc || (!all && cfg.kind == WORKLOAD_COUNT)) {
+    if (optind != argc || (!all && cfg.kind == WORKLOAD_COUNT) ||
+        (cfg.timeline_path != NULL && !all && cfg.kind != INSERT)) {
         usage(argv[0]);
     }
 

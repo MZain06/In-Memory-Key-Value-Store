@@ -54,9 +54,10 @@ bench: $(BENCH)
 
 bench-smoke: $(BENCH)
 	rm -f $(RELEASE_DIR)/smoke.csv
-	$(BENCH) -w all -k 1000 -n 20000 -r 2 -o $(RELEASE_DIR)/smoke.csv
+	$(BENCH) -w all -k 1000 -n 20000 -r 2 -o $(RELEASE_DIR)/smoke.csv -t $(RELEASE_DIR)/smoke_timeline.csv
 	@test "$$(wc -l < $(RELEASE_DIR)/smoke.csv)" -eq 9 || { echo "smoke.csv should have 9 lines"; exit 1; }
-	$(VALGRIND) $(BENCH) -w all -k 500 -n 2000 -r 1
+	@test "$$(wc -l < $(RELEASE_DIR)/smoke_timeline.csv)" -eq 2 || { echo "smoke_timeline.csv should have 2 lines"; exit 1; }
+	$(VALGRIND) $(BENCH) -w all -k 500 -n 2000 -r 1 -t $(RELEASE_DIR)/smoke_timeline.csv
 
 format:
 	clang-format -i $(STYLE_SRC)

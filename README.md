@@ -4,7 +4,7 @@
 
 A hash-table key-value store in C11, in progress: separate chaining, dynamic resizing and an opaque public API, with a benchmark harness for throughput and p50/p99 latency.
 
-**Status:** v0.1.0, a complete and tested hash-table library; the benchmark harness comes next.
+**Status:** v0.2.0, the tested hash-table library plus a benchmark harness; measured results come next.
 
 ## Build and test
 
@@ -17,6 +17,8 @@ Needs Linux or WSL2 with `gcc` or `clang`, `make`, `valgrind`, `clang-format` an
 | `make asan` | Runs the tests under AddressSanitizer and UBSan |
 | `make valgrind` | Runs the tests under Valgrind |
 | `make examples` | Builds and runs the example programs |
+| `make bench` | Builds the benchmark with `-O2 -DNDEBUG` |
+| `make bench-smoke` | Runs a tiny benchmark, normally and under Valgrind |
 | `make format` | Formats the code with clang-format |
 | `make format-check` | Fails if any file is not formatted |
 | `make lint` | Runs cppcheck static analysis |
@@ -55,6 +57,26 @@ The random test uses a fixed seed (42), so every run is reproducible. A failure 
 ```
 
 CI runs every test with gcc and clang, under AddressSanitizer and UBSan, and under Valgrind. Tests use [Unity](https://github.com/ThrowTheSwitch/Unity) v2.7.0, vendored in `tests/unity/`.
+
+## Benchmarks
+
+`bench/bench.c` measures four workloads at 10,000, 100,000 and 1,000,000 keys:
+
+| Workload | What it measures |
+| --- | --- |
+| `insert` | Building a table from empty, including every resize |
+| `get_hit` | Looking up keys that exist, in random order, and reading the value |
+| `get_miss` | Looking up keys that don't exist |
+| `mixed` | 90% lookups and 10% overwrites of existing keys |
+
+Each configuration runs once to warm up, then 5 measured runs. Every run builds its own table and makes two passes over the same 5 million operations: one timed as a whole for throughput, and one that times each operation for p50, p99 and p99.9 latency. Keys and lookup orders come from a fixed seed and are generated before timing starts, every page of memory is touched beforehand, and every pass checks its own results. The cost of the timer itself is measured at startup and recorded in every row.
+
+```bash
+./scripts/run_bench.sh
+python3 scripts/compare.py results/results.csv
+```
+
+The script builds with `-O2 -DNDEBUG`, pins the benchmark to one CPU, records the machine in `results/env.txt`, and adds a load-factor sweep (0.25 to 4) at 1M keys. `compare.py` summarises one results file, or compares the medians of two.
 
 ## Licence
 

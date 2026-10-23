@@ -59,3 +59,5 @@ jobs:
         run: make CC=${{ matrix.cc }} valgrind
       - name: Example program
         run: make CC=${{ matrix.cc }} examples
+      - name: Benchmark smoke test
+        run: make CC=${{ matrix.cc }} bench-smoke

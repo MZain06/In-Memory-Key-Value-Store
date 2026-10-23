@@ -156,6 +156,15 @@ static void test_put_copies_key_and_value(void) {
     assert_value(store, "Xutable", "Xriginal", 8);
 }
 
+static void test_overwrite_with_its_own_value(void) {
+    const void *value = NULL;
+    size_t len = 0;
+    put_string(store, "echo", "same bytes again");
+    TEST_ASSERT_EQUAL_INT(KV_OK, kv_get(store, "echo", &value, &len));
+    TEST_ASSERT_EQUAL_INT(KV_OK, kv_put(store, "echo", value, len));
+    assert_value(store, "echo", "same bytes again", 16);
+}
+
 static void test_null_arguments_are_rejected(void) {
     const void *value = NULL;
     size_t value_len = 0;
@@ -304,6 +313,7 @@ int main(void) {
     RUN_TEST(test_value_with_zero_bytes_round_trips);
     RUN_TEST(test_empty_value_round_trips);
     RUN_TEST(test_put_copies_key_and_value);
+    RUN_TEST(test_overwrite_with_its_own_value);
     RUN_TEST(test_null_arguments_are_rejected);
     RUN_TEST(test_many_keys_share_few_buckets);
     RUN_TEST(test_deletes_anywhere_in_long_chains);

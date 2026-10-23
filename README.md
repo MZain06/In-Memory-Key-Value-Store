@@ -4,7 +4,7 @@
 
 A hash-table key-value store in C11, in progress: separate chaining, dynamic resizing and an opaque public API, with a benchmark harness for throughput and p50/p99 latency.
 
-**Status:** the hash table works and resizes automatically, with a documented API and an example program; randomised testing and benchmarks come next.
+**Status:** v0.1.0, a complete and tested hash-table library; the benchmark harness comes next.
 
 ## Build and test
 
@@ -12,6 +12,7 @@ Needs Linux or WSL2 with `gcc` or `clang`, `make`, `valgrind`, `clang-format` an
 
 | Command | What it does |
 | --- | --- |
+| `make check` | Runs every check that CI runs |
 | `make test` | Builds and runs the unit tests |
 | `make asan` | Runs the tests under AddressSanitizer and UBSan |
 | `make valgrind` | Runs the tests under Valgrind |
@@ -42,7 +43,18 @@ kv_destroy(store);
 
 `include/kv.h` documents the full contract, and `examples/basic.c` is a complete program.
 
-Unit tests use [Unity](https://github.com/ThrowTheSwitch/Unity) v2.7.0, vendored in `tests/unity/`.
+## Testing
+
+- `tests/test_kv.c`: unit tests for every API function, covering edge cases (empty keys and values, zero bytes inside values, 1 KB keys), long chains, resizing and pointer stability.
+- `tests/test_model.c`: a randomised model-based test. It runs 3 million random puts, gets and deletes against a simple array model and checks every result. One run alternates filling and emptying phases so the table resizes over 200 times; another uses a load factor of 4 to force long chains.
+
+The random test uses a fixed seed (42), so every run is reproducible. A failure names the operation and the seed. After `make test`, replay a seed or try a new one with:
+
+```bash
+./build/debug/bin/test_model 1234
+```
+
+CI runs every test with gcc and clang, under AddressSanitizer and UBSan, and under Valgrind. Tests use [Unity](https://github.com/ThrowTheSwitch/Unity) v2.7.0, vendored in `tests/unity/`.
 
 ## Licence
 

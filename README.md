@@ -4,7 +4,7 @@
 
 A hash-table key-value store in C11, in progress: separate chaining, dynamic resizing and an opaque public API, with a benchmark harness for throughput and p50/p99 latency.
 
-**Status:** v0.2.0, the tested hash-table library plus a benchmark harness; measured results come next.
+**Status:** v0.2.0 plus measured results (below); the final write-up and v1.0.0 come next.
 
 ## Build and test
 
@@ -73,10 +73,32 @@ Each configuration runs once to warm up, then 5 measured runs. Every run builds 
 
 ```bash
 ./scripts/run_bench.sh
-python3 scripts/compare.py results/results.csv
+python3 scripts/plot.py
 ```
 
-The script builds with `-O2 -DNDEBUG`, pins the benchmark to one CPU, records the machine in `results/env.txt`, and adds a load-factor sweep (0.25 to 4) at 1M keys. `compare.py` summarises one results file, or compares the medians of two.
+The script builds with `-O2 -DNDEBUG`, pins the benchmark to one CPU, records the machine in `results/env.txt`, adds a load-factor sweep (0.25 to 4) at 1M keys, and records the slowest insert in every 1,000 while building a 1M-key table. `plot.py` (needs pandas and matplotlib) draws the charts below and writes `results/summary.md`. To check a second run against the first, run `./scripts/run_bench.sh build/check`, then `python3 scripts/compare.py results/results.csv build/check/results.csv`.
+
+## Results
+
+Measured on a laptop with an Intel Core Ultra 9 185H (24 MiB L3 cache) under WSL2, Ubuntu 24.04 and gcc 13.3 with `-O2 -DNDEBUG`. Each number is the median of 5 runs: [results/summary.md](results/summary.md) lists every median, and [results/env.txt](results/env.txt) has the machine details.
+
+A second full run matched these medians within 5% for 9 of the 12 tests and within 11% for all of them, and matched the load-factor sweep within 8%. Single runs vary much more (by up to ±29%, as the whiskers show), likely because the laptop mixes performance and efficiency cores and WSL2 can't choose which kind runs the benchmark.
+
+![Throughput by workload and table size](results/throughput.png)
+
+**At 1M keys, a lookup that misses is 1.9× faster than one that hits** (7.0 vs 3.7 M ops/s). With 0.48 keys per bucket on average, most buckets are empty, so a miss usually stops at the bucket or after comparing one stored hash. A hit also has to follow pointers to the key, to compare it, and then to the value: separate allocations that are rarely in cache in a 161 MB table. At 10k keys, where the whole table fits in cache, hits and misses run at about the same speed.
+
+![Latency as the table grows](results/latency.png)
+
+**A typical lookup is 6.2× slower at 1M keys than at 10k.** The median `get_hit` takes 90 ns when the table is ≈1.6 MB and fits in cache, but 559 ns when it is ≈161 MB, over 6× the size of the L3 cache. Each lookup follows pointers through a bucket, an entry, a key and a value, so in a big table most of those steps are trips to main memory. The p99 grows with it, from 181 ns to 1.4 µs.
+
+![What the load factor trades: speed for memory](results/load_factor.png)
+
+**The default load factor costs no measurable lookup speed and halves the bucket memory.** Because the table grows by doubling, the default maximum of 0.75 leaves 1M keys at an actual load of 0.48. There, `get_hit` runs at 3.52 M ops/s, the same within noise as the roomiest setting tested (3.56 at 0.24), with a 16 MiB bucket array instead of 32 MiB. Packing keys tighter costs more: at a load of 3.81 the array shrinks to 2 MiB, but `get_hit` loses 40% of its throughput and `get_miss` 78%. Misses lose the most because they check every entry in a chain while hits stop at their key, so misses lose their lead by a load of 1.91 and fall behind at 3.81.
+
+![The slowest insert in every 1,000](results/insert_timeline.png)
+
+**Each resize stalls one insert, and each stall is about twice as long as the last.** Building a 1M-key table resizes 18 times. The slowest insert took 25.1 ms, when the table doubled to 2,097,152 buckets and moved all 786,433 entries; the slowest insert in a typical window of 1,000 took 1.3 µs. Because each resize comes after twice as many inserts as the one before, the 18 resizes moved about 1.6 million entries in total, so the average cost per insert stays constant (amortised O(1)). Systems that can't accept a long pause, such as Redis, resize incrementally instead, moving a few buckets on each operation.
 
 ## Licence
 
